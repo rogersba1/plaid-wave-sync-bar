@@ -24,13 +24,15 @@ jobs:
         env:
           PLAID_CLIENT_ID: ${{ secrets.PLAID_CLIENT_ID }}
           PLAID_ACCESS_TOKENS: ${{ secrets.PLAID_ACCESS_TOKENS }}
+          PLAID_SECRET: ${{ secrets.PLAID_SECRET }}
         run: |
-          if [ -z "$PLAID_CLIENT_ID" ] || [ -z "$PLAID_ACCESS_TOKENS" ]; then
+          if [ -z "$PLAID_CLIENT_ID" ] || [ -z "$PLAID_ACCESS_TOKENS" ] || [ -z "$PLAID_SECRET" ]; then
             echo "::error::Setup incomplete. Open this repo in a Codespace and run ./setup.sh to configure your accounts."
             echo ""
             echo "Missing:"
             [ -z "$PLAID_CLIENT_ID" ] && echo "  - PLAID_CLIENT_ID"
             [ -z "$PLAID_ACCESS_TOKENS" ] && echo "  - PLAID_ACCESS_TOKENS"
+            [ -z "$PLAID_SECRET" ] && echo " - PLAID_SECRET"
             echo ""
             echo "Fix: https://github.com/${{ github.repository }}#setup-5-minutes"
             exit 1
