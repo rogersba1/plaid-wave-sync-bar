@@ -14,6 +14,21 @@ import json, os, sys, httpx
 with open('/tmp/plaid-tokens-all.jsonl') as f:
     tokens = [json.loads(l) for l in f if l.strip()]
 
+# ========================================================
+# CRITICAL BACKUP: Save real tokens to a dedicated file
+# ========================================================
+with open('/tmp/my-real-plaid-tokens.txt', 'w') as backup_file:
+    backup_file.write("=== RAW PLAID ACCESS TOKENS BACKUP ===\n\n")
+    for t in tokens:
+        # Check if this looks like a real token or mock sandbox data
+        token_str = t.get('access_token', 'No token found')
+        backup_file.write(f"Access Token: {token_str}\n")
+        backup_file.write("Associated Accounts:\n")
+        for acct in t.get('accounts', []):
+            backup_file.write(f"  - {acct.get('name')} (Mask: {acct.get('mask')}, Type: {acct.get('type')})\n")
+        backup_file.write("\n" + "="*40 + "\n\n")
+# ========================================================
+
 biz_id = os.environ.get('WAVE_BUSINESS_ID', '')
 wave_token = os.environ.get('WAVE_ACCESS_TOKEN', '')
 if not wave_token or not biz_id:
@@ -70,6 +85,9 @@ for t in tokens:
         hit = next((w for w in cands if mask and mask != '0000' and mask in w), None)
         if not hit and len(mask) >= 3:  # banks/Wave sometimes record only the last 3 digits
             hit = next((w for w in cands if mask[-3:] in w), None)
+        if not hit:
+            name_l = name.lower()
+            hit = next((w for w in cands if name_l in w.lower() or w.lower() in name_l), None)
         if hit:
             matched.append(f"{name}:{token}:{hit}:{acct_type}:{account_id}")
             print(f"  ✓ {name} (mask={mask}) → {hit} ({acct_type})")
@@ -78,6 +96,7 @@ for t in tokens:
                               "mask": mask, "account_id": account_id})
             print(f"  ⚠ {name} (mask={mask}) — needs manual pick ({acct_type})")
 
+# Join with commas as expected by setup.sh
 with open('/tmp/plaid-access-tokens.txt', 'w') as f:
     f.write(','.join(matched))
 with open('/tmp/plaid-unmatched.jsonl', 'w') as f:

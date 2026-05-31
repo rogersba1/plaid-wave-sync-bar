@@ -628,7 +628,12 @@ if [ "$save_secrets" = "y" ]; then
         [ -n "$tokens" ] && PLAID_ACCESS_TOKENS="$tokens" && export PLAID_ACCESS_TOKENS
     fi
     if [ -n "$PLAID_ACCESS_TOKENS" ]; then
-        _set_secret PLAID_ACCESS_TOKENS "$PLAID_ACCESS_TOKENS"
+        if gh secret set PLAID_ACCESS_TOKENS --body "$PLAID_ACCESS_TOKENS" &>/dev/null; then
+            success "Saved PLAID_ACCESS_TOKENS to GitHub"
+        else
+            warn "GitHub secret save failed. Copy and paste this string manually into GitHub Secrets:"
+            echo -e "\n${BOLD}${YELLOW}${PLAID_ACCESS_TOKENS}${NC}\n"
+        fi
     else
         warn "PLAID_ACCESS_TOKENS not set. The Action will fail until this is configured."
         info "Re-run ./setup.sh or set it manually in Settings → Secrets → Actions"
