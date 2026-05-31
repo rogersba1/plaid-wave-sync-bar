@@ -32,9 +32,17 @@ load_dotenv()
 PLAID_BASE = "https://production.plaid.com"
 WAVE_BASE = "https://gql.waveapps.com/graphql/public"
 
+
+def get_keywords_path():
+    configured = os.environ.get("KEYWORDS_FILE", "keywords.json")
+    path = Path(configured)
+    if not path.is_absolute():
+        path = Path(__file__).parent / path
+    return path
+
 def load_keywords():
     """Load keyword mappings from keywords.json."""
-    kw_path = Path(__file__).parent / "keywords.json"
+    kw_path = get_keywords_path()
     if not kw_path.exists():
         log.error(f"keywords.json not found at {kw_path}")
         sys.exit(1)
@@ -579,6 +587,8 @@ def main():
             line_id, matched, skip = categorize(name, wave_accounts, keywords, is_expense)
 
             if skip:
+                if args.dry_run:
+                    log.info(f"    DRY RUN SKIP: {name} | ${abs(amount):.2f}")
                 log.debug(f"  SKIP: {name}")
                 skipped += 1
                 continue
@@ -605,6 +615,13 @@ def main():
                     log.info(f"    📎 Matched invoice #{invoice_matched['number']}")
 
             if args.dry_run:
+                if invoice_matched:
+                    log.info(
+                        f"    DRY RUN {direction}: {name} | ${abs(amount):.2f} "
+                        f"→ invoice #{invoice_matched['number']}"
+                    )
+                else:
+                    log.info(f"    DRY RUN {direction}: {name} | ${abs(amount):.2f} → {matched}")
                 skipped += 1
                 continue
 

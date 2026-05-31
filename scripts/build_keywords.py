@@ -5,27 +5,46 @@
 """Build keywords.json from a Wave General Ledger CSV export."""
 import csv, json, re, sys
 
-VALID_TYPES = ('Accounting Fees', 'Advertising & Promotion', 'Bank Service Charges',
-    'Computer – Hardware', 'Computer – Hosting', 'Computer – Internet', 'Computer – Software',
-    'Dues & Subscriptions', 'Insurance', 'Meals and Entertainment',
-    'Office Supplies', 'Payroll Employer Taxes', 'Payroll Gross Pay',
-    'Payroll – Salary & Wages', 'Postage & Delivery', 'Professional Fees',
-    'Rent Expense', 'Subcontracted Services', 'Taxes – Corporate Tax',
-    'Telephone – Wireless', 'Travel Expense', 'Uncategorized Expense',
-    'Vehicle – Fuel', 'Video Gear')
+INPUT_PATH = sys.argv[1]
+OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else 'keywords.json'
+
+NON_PNL_ACCOUNTS = {
+    'accounts payable', 'accounts receivable', 'cash on hand', 'transfer clearing',
+    'owner investment / drawings', "owner's equity", 'mortgages',
+}
+DEFAULT_SKIP_PATTERNS = ('chase credit', 'automatic payment', 'autopay')
+DEFAULT_FALLBACK_EXPENSE = 'Uncategorized Expense'
+DEFAULT_FALLBACK_INCOME = 'Uncategorized Income'
+
+
+def should_learn_from_account(account_name):
+    lower = account_name.lower()
+    if lower in NON_PNL_ACCOUNTS:
+        return False
+    return not any(token in lower for token in (
+        'checking', 'savings', 'credit card', 'mortgage', 'payable', 'receivable',
+        'equity', 'clearing', 'cash on hand', 'disconnected on', 'loan'
+    ))
+
+
+def should_skip_description(desc):
+    lower = desc.lower()
+    return 'transfer' in lower or lower.startswith('interest paid')
 
 current_account = None
 account_transactions = {}
+seen_accounts = set()
 
-with open(sys.argv[1], encoding='utf-8-sig') as f:
+with open(INPUT_PATH, encoding='utf-8-sig') as f:
     for row in csv.reader(f):
         if len(row) >= 2 and not row[0] and row[1] and not any(row[2:5]):
             current_account = row[1].strip()
+            seen_accounts.add(current_account)
         elif len(row) > 2 and current_account and row[2].strip():
             desc = row[2].strip()
             if desc in ('Starting Balance', 'Totals and Ending Balance', 'Balance Change'):
                 continue
-            if current_account in VALID_TYPES:
+            if should_learn_from_account(current_account) and not should_skip_description(desc):
                 account_transactions.setdefault(current_account, []).append(desc)
 
 def extract_keyword(desc):
@@ -56,8 +75,6 @@ def extract_keyword(desc):
 
 keyword_counts = {}
 for account, descs in account_transactions.items():
-    if account not in VALID_TYPES:
-        continue
     for desc in descs:
         kw = extract_keyword(desc)
         if not kw or len(kw) < 3:
@@ -77,16 +94,18 @@ for kw, accounts in keyword_counts.items():
 if 'uber eats' in keywords and 'uber' in keywords:
     keywords['uber'] = 'Travel Expense'
 
-for pattern in ('transfer to', 'transfer from', 'chase credit', 'automatic payment', 'autopay'):
+for pattern in DEFAULT_SKIP_PATTERNS:
     keywords[pattern] = None
+
+fallback_income = DEFAULT_FALLBACK_INCOME if DEFAULT_FALLBACK_INCOME in seen_accounts else 'Other'
 
 output = {
     'keywords': dict(sorted(keywords.items())),
-    'fallback_expense': 'Uncategorized Expense',
-    'fallback_income': 'Other'
+    'fallback_expense': DEFAULT_FALLBACK_EXPENSE,
+    'fallback_income': fallback_income
 }
 
-with open('keywords.json', 'w') as f:
+with open(OUTPUT_PATH, 'w') as f:
     json.dump(output, f, indent=2, ensure_ascii=False)
 
-print(f'Generated {len(keywords)} keywords across {len(set(v for v in keywords.values() if v))} categories')
+print(f'Generated {len(keywords)} keywords across {len(set(v for v in keywords.values() if v))} categories -> {OUTPUT_PATH}')

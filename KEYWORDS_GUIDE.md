@@ -9,7 +9,7 @@ Keywords are auto-generated during setup from your Wave general ledger CSV. This
   "keywords": {
     "vendor keyword": "Wave Account Name",
     "another vendor": "Wave Account Name",
-    "transfer keyword": null
+    "skip keyword": null
   },
   "fallback_expense": "Uncategorized Expense",
   "fallback_income": "Other"
@@ -21,7 +21,7 @@ Keywords are auto-generated during setup from your Wave general ledger CSV. This
 - Keywords are **lowercase** substrings matched against transaction descriptions
 - Values must **exactly** match a Wave account name (run `uv run plaid_sync.py --dump-accounts` to see them)
 - Only use Expense or Income accounts (NOT Asset, Equity, or Liability)
-- Use `null` for internal transfers and CC payments only
+- Use `null` only for transactions you explicitly want to skip
 - Shorter keywords are better (e.g., "adobe" not "adobe creative cloud")
 
 ## Validate
@@ -38,3 +38,12 @@ To rebuild from a new CSV export:
 ```bash
 uv run scripts/build_keywords.py "path/to/your.csv"
 ```
+
+To maintain separate keyword maps per business:
+
+```bash
+uv run scripts/build_keywords.py "imports/34 Grant Fourplex Account Transactions 2026-05-30-00_56.csv" "keywords/34-grant.json"
+KEYWORDS_FILE=keywords/34-grant.json uv run plaid_sync.py --dry-run --days 30
+```
+
+If `KEYWORDS_FILE` is not set, the sync defaults to `keywords.json`.
