@@ -54,6 +54,8 @@ jobs:
           WAVE_ACCESS_TOKEN: ${{ secrets.WAVE_ACCESS_TOKEN }}
           WAVE_BUSINESS_ID: ${{ secrets.WAVE_BUSINESS_ID }}
           PLAID_ACCESS_TOKENS: ${{ secrets.PLAID_ACCESS_TOKENS }}
+          PLAID_ACCOUNT_BUSINESS_IDS: ${{ secrets.PLAID_ACCOUNT_BUSINESS_IDS }}
+          KEYWORDS_FILES_BY_BUSINESS: ${{ secrets.KEYWORDS_FILES_BY_BUSINESS }}
         run: |
           DAYS="${{ github.event.inputs.days || '3' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"

@@ -78,6 +78,28 @@ Plaid (bank)              keywords.json           Wave (accounting)
 | `--add-bank` | Connect a new bank via Plaid Hosted Link |
 | `--debug` | Verbose logging |
 
+## Multi-Business Setup
+
+One run can sync multiple Wave businesses, even when all bank accounts come from one Plaid connection.
+
+Use these env vars:
+
+- `WAVE_BUSINESS_ID` = default business id (used when an account is not explicitly mapped)
+- `PLAID_ACCOUNT_BUSINESS_IDS` = map each Plaid account to a Wave business id
+- `KEYWORDS_FILES_BY_BUSINESS` = use a separate keywords json file per business id
+
+Format examples:
+
+```bash
+# Optional account-level routing (key can be plaid account_id or account name)
+PLAID_ACCOUNT_BUSINESS_IDS="plaid_account_id_1:biz_34,plaid_account_id_2:biz_95,plaid_account_id_3:biz_321"
+
+# Optional per-business keyword files
+KEYWORDS_FILES_BY_BUSINESS="biz_34:keywords/34-grant.json,biz_95:keywords/95-kendall.json,biz_321:keywords/321-walnut.json"
+```
+
+If these are not set, behavior stays the same as before: all accounts sync into `WAVE_BUSINESS_ID` and use `KEYWORDS_FILE` (or `keywords.json`).
+
 ## Deployment Options
 
 | Platform | How |
