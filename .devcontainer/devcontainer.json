@@ -2,7 +2,6 @@
   "name": "plaid-wave-sync",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "postCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc",
-  "postAttachCommand": "./setup.sh",
   "customizations": {
     "vscode": {
       "settings": {
