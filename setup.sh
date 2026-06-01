@@ -110,6 +110,9 @@ echo -e "${BOLD}  ║     ${CYAN}plaid-wave-sync${NC}${BOLD} setup              
 echo -e "${BOLD}  ║     Plaid → Wave in 5 minutes           ║${NC}"
 echo -e "${BOLD}  ╚══════════════════════════════════════════╝${NC}"
 echo ""
+warn "Multi-business setup is not automated in this script yet."
+info "This setup flow currently configures one Wave business; if you need multiple businesses, complete setup first, then configure multi-business mappings manually."
+echo ""
 
 # ─── Make repo private ────────────────────────────────────────────────────────
 

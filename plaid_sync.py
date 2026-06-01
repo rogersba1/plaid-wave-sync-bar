@@ -14,13 +14,16 @@ Usage:
 Environment variables:
     PLAID_CLIENT_ID / PLAID_SECRET
     WAVE_ACCESS_TOKEN
-    WAVE_BUSINESS_ID          — your Wave business ID (run --dump-accounts to find it)
+    WAVE_BUSINESS_ID          — default Wave business ID (run --dump-accounts to find it)
     PLAID_ACCESS_TOKENS       — comma-separated list: name:token:wave_account:type
                                 e.g. "Bluevine:access-prod-xxx:My Checking (001):checking,Chase:access-prod-yyy:Credit Card (1234):credit_card"
+    PLAID_ACCOUNT_BUSINESS_IDS — optional account routing map: account_id_or_name:business_id,account_id_or_name:business_id
+    KEYWORDS_FILES_BY_BUSINESS — optional keyword file map: business_id:path_to_keywords_json,business_id:path_to_keywords_json
 """
 
 import os, sys, time, json, logging, argparse
 import httpx
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -40,15 +43,43 @@ def get_keywords_path():
         path = Path(__file__).parent / path
     return path
 
-def load_keywords():
-    """Load keyword mappings from keywords.json."""
-    kw_path = get_keywords_path()
+def load_keywords(path_override=None):
+    """Load keyword mappings from a keywords json file."""
+    if path_override:
+        kw_path = Path(path_override)
+        if not kw_path.is_absolute():
+            kw_path = Path(__file__).parent / kw_path
+    else:
+        kw_path = get_keywords_path()
     if not kw_path.exists():
-        log.error(f"keywords.json not found at {kw_path}")
+        log.error(f"keywords file not found at {kw_path}")
         sys.exit(1)
     with open(kw_path) as f:
         data = json.load(f)
     return data["keywords"], data.get("fallback_expense", "Uncategorized Expense"), data.get("fallback_income", "Other")
+
+
+def parse_mapping_env(var_name):
+    """Parse env map entries formatted as key:value,key:value."""
+    raw = os.environ.get(var_name, "").strip()
+    if not raw:
+        return {}
+
+    result = {}
+    for entry in raw.split(","):
+        item = entry.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            log.warning(f"Skipping malformed {var_name} entry: {entry}")
+            continue
+        key, value = item.split(":", 1)
+        key, value = key.strip(), value.strip()
+        if not key or not value:
+            log.warning(f"Skipping malformed {var_name} entry: {entry}")
+            continue
+        result[key] = value
+    return result
 
 
 def parse_accounts():
@@ -75,6 +106,15 @@ def parse_accounts():
         accounts.append({"name": name, "token": token, "wave_account": wave_account,
                          "type": acct_type, "account_id": account_id})
     return accounts
+
+
+def resolve_account_business_id(acct_cfg, account_business_map, default_business_id):
+    """Resolve account business using account_id, then account name, then default."""
+    if acct_cfg.get("account_id") and acct_cfg["account_id"] in account_business_map:
+        return account_business_map[acct_cfg["account_id"]]
+    if acct_cfg["name"] in account_business_map:
+        return account_business_map[acct_cfg["name"]]
+    return default_business_id
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +175,17 @@ def get_business_id():
             log.info(f"Using Wave business: {e['node']['name']}")
             return e["node"]["id"]
     raise RuntimeError("No active Wave business found")
+
+
+def get_active_businesses():
+    """Return active Wave businesses as {id: name}."""
+    businesses = {}
+    data = wave_gql('{ businesses(page:1, pageSize:50) { edges { node { id name isArchived } } } }')
+    for e in data["businesses"]["edges"]:
+        node = e["node"]
+        if not node["isArchived"]:
+            businesses[node["id"]] = node["name"]
+    return businesses
 
 
 def load_wave_accounts(biz_id):
@@ -509,31 +560,48 @@ def main():
                 print(f"  Error: {e}")
         return
 
-    biz_id = get_business_id()
-    wave_accounts = load_wave_accounts(biz_id)
-    log.info(f"Loaded {len(wave_accounts)} Wave accounts")
-
-    if args.dump_accounts:
-        print(f"\nWave Business ID: {biz_id}\n")
-        by_type = {}
-        for info in wave_accounts.values():
-            by_type.setdefault(info["type"], []).append(info["name"])
-        for t in sorted(by_type):
-            print(f"[{t}]")
-            for n in sorted(by_type[t]):
-                print(f"  {n}")
-            print()
-
-        keywords, _, _ = load_keywords()
-        print(f"{'='*60}\nKeyword validation:")
-        targets = sorted(set(v for v in keywords.values() if v))
-        for t in targets:
-            found = find_account_id(wave_accounts, t)
-            status = f"✓ → {found['name']}" if found else "✗ NOT FOUND"
-            print(f"  {t:40s} {status}")
-        return
+    default_biz_id = get_business_id()
+    account_business_map = parse_mapping_env("PLAID_ACCOUNT_BUSINESS_IDS")
+    keywords_file_map = parse_mapping_env("KEYWORDS_FILES_BY_BUSINESS")
+    businesses_by_id = get_active_businesses()
 
     accounts_cfg = parse_accounts()
+
+    accounts_by_business = defaultdict(list)
+    for acct_cfg in accounts_cfg:
+        resolved_biz_id = resolve_account_business_id(acct_cfg, account_business_map, default_biz_id)
+        accounts_by_business[resolved_biz_id].append(acct_cfg)
+
+    if args.dump_accounts:
+        dump_business_ids = set([default_biz_id])
+        dump_business_ids.update(account_business_map.values())
+        dump_business_ids.update(keywords_file_map.keys())
+
+        for biz_id in sorted(dump_business_ids):
+            wave_accounts = load_wave_accounts(biz_id)
+            biz_name = businesses_by_id.get(biz_id, biz_id)
+            print(f"\nWave Business: {biz_name}\nWave Business ID: {biz_id}\n")
+            by_type = {}
+            for info in wave_accounts.values():
+                by_type.setdefault(info["type"], []).append(info["name"])
+            for t in sorted(by_type):
+                print(f"[{t}]")
+                for n in sorted(by_type[t]):
+                    print(f"  {n}")
+                print()
+
+            keywords_path = keywords_file_map.get(biz_id)
+            keywords, _, _ = load_keywords(keywords_path)
+            path_display = keywords_path or os.environ.get("KEYWORDS_FILE", "keywords.json")
+            print(f"Using keywords file: {path_display}")
+            print(f"{'='*60}\nKeyword validation:")
+            targets = sorted(set(v for v in keywords.values() if v))
+            for t in targets:
+                found = find_account_id(wave_accounts, t)
+                status = f"✓ → {found['name']}" if found else "✗ NOT FOUND"
+                print(f"  {t:40s} {status}")
+        return
+
     if not accounts_cfg:
         log.error("No accounts configured. Set PLAID_ACCESS_TOKENS env var.")
         log.error("Format: Name:access-token:Wave Account Name:checking")
@@ -543,109 +611,115 @@ def main():
         reconcile(accounts_cfg, args.days)
         return
 
-    keywords, fallback_expense, fallback_income = load_keywords()
-    open_invoices = load_open_invoices(biz_id)
-    if open_invoices:
-        log.info(f"Open invoices: {len(open_invoices)}")
-
     # ── Sync ──────────────────────────────────────────────────────────────────
     created = skipped = errors = 0
 
-    for acct_cfg in accounts_cfg:
-        acct_type = acct_cfg["type"]
-        wallet = find_account_id(wave_accounts, acct_cfg["wave_account"])
-        if not wallet:
-            log.error(f"Wave account '{acct_cfg['wave_account']}' not found! Run --dump-accounts")
-            errors += 1
-            continue
+    for biz_id, biz_accounts in accounts_by_business.items():
+        biz_name = businesses_by_id.get(biz_id, biz_id)
+        wave_accounts = load_wave_accounts(biz_id)
+        log.info(f"Loaded {len(wave_accounts)} Wave accounts for {biz_name}")
 
-        log.info(f"\n{'='*60}\n{acct_cfg['name']} → {wallet['name']} ({acct_type})\n{'='*60}")
+        keywords_path = keywords_file_map.get(biz_id)
+        keywords, fallback_expense, fallback_income = load_keywords(keywords_path)
+        open_invoices = load_open_invoices(biz_id)
+        if open_invoices:
+            log.info(f"Open invoices for {biz_name}: {len(open_invoices)}")
 
-        txns = fetch_plaid_transactions(acct_cfg["token"], args.days,
-                                        [acct_cfg["account_id"]] if acct_cfg.get("account_id") else None)
-        log.info(f"Fetched {len(txns)} transactions")
-
-        for txn in txns:
-            name = txn.get("name", "").strip()
-            amount = float(txn["amount"])
-            date = txn["date"]
-            txn_id = txn["transaction_id"]
-
-            if not name or txn.get("pending"):
-                skipped += 1
+        for acct_cfg in biz_accounts:
+            acct_type = acct_cfg["type"]
+            wallet = find_account_id(wave_accounts, acct_cfg["wave_account"])
+            if not wallet:
+                log.error(f"Wave account '{acct_cfg['wave_account']}' not found in business '{biz_name}'! Run --dump-accounts")
+                errors += 1
                 continue
 
-            name_lower = name.lower()
-            # CC payment on the CC side — skip to avoid double-counting
-            # The checking side records it as Uncategorized Expense for manual recategorization
-            if acct_type == "credit_card" and any(k in name_lower for k in ("automatic payment", "payment - thank", "online payment")):
-                log.debug(f"  SKIP cc-payment (CC side): {name}")
-                skipped += 1
-                continue
+            log.info(f"\n{'='*60}\n{biz_name}: {acct_cfg['name']} → {wallet['name']} ({acct_type})\n{'='*60}")
 
-            is_expense = amount > 0
-            line_id, matched, skip = categorize(name, wave_accounts, keywords, is_expense)
+            txns = fetch_plaid_transactions(acct_cfg["token"], args.days,
+                                            [acct_cfg["account_id"]] if acct_cfg.get("account_id") else None)
+            log.info(f"Fetched {len(txns)} transactions")
 
-            if skip:
-                if args.dry_run:
-                    log.info(f"    DRY RUN SKIP: {name} | ${abs(amount):.2f}")
-                log.debug(f"  SKIP: {name}")
-                skipped += 1
-                continue
+            for txn in txns:
+                name = txn.get("name", "").strip()
+                amount = float(txn["amount"])
+                date = txn["date"]
+                txn_id = txn["transaction_id"]
 
-            if not line_id:
-                fallback = fallback_expense if is_expense else fallback_income
-                fallback_acct = find_account_id(wave_accounts, fallback)
-                if fallback_acct:
-                    line_id = fallback_acct["id"]
-                    matched = f"UNCATEGORIZED → {fallback_acct['name']}"
-                    log.debug(f"  UNMATCHED → {fallback}: {name} | ${abs(amount):.2f}")
-                else:
-                    log.error(f"  NO MATCH: {name} | ${abs(amount):.2f}")
-                    errors += 1
+                if not name or txn.get("pending"):
+                    skipped += 1
                     continue
 
-            direction = "EXPENSE" if is_expense else "INCOME"
-            log.debug(f"  {direction}: {name} | ${abs(amount):.2f} → {matched}")
+                name_lower = name.lower()
+                # CC payment on the CC side — skip to avoid double-counting
+                # The checking side records it as Uncategorized Expense for manual recategorization
+                if acct_type == "credit_card" and any(k in name_lower for k in ("automatic payment", "payment - thank", "online payment")):
+                    log.debug(f"  SKIP cc-payment (CC side): {name}")
+                    skipped += 1
+                    continue
 
-            invoice_matched = None
-            if not is_expense and acct_type == "checking" and open_invoices:
-                invoice_matched = match_invoice(name, amount, open_invoices)
-                if invoice_matched:
-                    log.info(f"    📎 Matched invoice #{invoice_matched['number']}")
+                is_expense = amount > 0
+                line_id, matched, skip = categorize(name, wave_accounts, keywords, is_expense)
 
-            if args.dry_run:
-                if invoice_matched:
-                    log.info(
-                        f"    DRY RUN {direction}: {name} | ${abs(amount):.2f} "
-                        f"→ invoice #{invoice_matched['number']}"
-                    )
-                else:
-                    log.info(f"    DRY RUN {direction}: {name} | ${abs(amount):.2f} → {matched}")
-                skipped += 1
-                continue
+                if skip:
+                    if args.dry_run:
+                        log.info(f"    DRY RUN SKIP: {name} | ${abs(amount):.2f}")
+                    log.debug(f"  SKIP: {name}")
+                    skipped += 1
+                    continue
 
-            try:
-                if invoice_matched:
-                    record_invoice_payment(invoice_matched["id"], amount, date, wallet["id"])
-                    open_invoices.remove(invoice_matched)
-                    log.info(f"    ✓ Invoice #{invoice_matched['number']} marked paid")
-                    created += 1
-                else:
-                    wave_id = create_wave_transaction(
-                        description=name, amount=amount, date=date,
-                        anchor_id=wallet["id"], line_id=line_id,
-                        external_id=txn_id, acct_type=acct_type,
-                        is_expense=is_expense, biz_id=biz_id,
-                    )
-                    log.info(f"    ✓ {wave_id[:30]}")
-                    created += 1
-            except DuplicateError:
-                log.debug(f"    ⊘ duplicate")
-                skipped += 1
-            except Exception as e:
-                log.error(f"    ✗ {e}")
-                errors += 1
+                if not line_id:
+                    fallback = fallback_expense if is_expense else fallback_income
+                    fallback_acct = find_account_id(wave_accounts, fallback)
+                    if fallback_acct:
+                        line_id = fallback_acct["id"]
+                        matched = f"UNCATEGORIZED → {fallback_acct['name']}"
+                        log.debug(f"  UNMATCHED → {fallback}: {name} | ${abs(amount):.2f}")
+                    else:
+                        log.error(f"  NO MATCH: {name} | ${abs(amount):.2f}")
+                        errors += 1
+                        continue
+
+                direction = "EXPENSE" if is_expense else "INCOME"
+                log.debug(f"  {direction}: {name} | ${abs(amount):.2f} → {matched}")
+
+                invoice_matched = None
+                if not is_expense and acct_type == "checking" and open_invoices:
+                    invoice_matched = match_invoice(name, amount, open_invoices)
+                    if invoice_matched:
+                        log.info(f"    📎 Matched invoice #{invoice_matched['number']}")
+
+                if args.dry_run:
+                    if invoice_matched:
+                        log.info(
+                            f"    DRY RUN {direction}: {name} | ${abs(amount):.2f} "
+                            f"→ invoice #{invoice_matched['number']}"
+                        )
+                    else:
+                        log.info(f"    DRY RUN {direction}: {name} | ${abs(amount):.2f} → {matched}")
+                    skipped += 1
+                    continue
+
+                try:
+                    if invoice_matched:
+                        record_invoice_payment(invoice_matched["id"], amount, date, wallet["id"])
+                        open_invoices.remove(invoice_matched)
+                        log.info(f"    ✓ Invoice #{invoice_matched['number']} marked paid")
+                        created += 1
+                    else:
+                        wave_id = create_wave_transaction(
+                            description=name, amount=amount, date=date,
+                            anchor_id=wallet["id"], line_id=line_id,
+                            external_id=txn_id, acct_type=acct_type,
+                            is_expense=is_expense, biz_id=biz_id,
+                        )
+                        log.info(f"    ✓ {wave_id[:30]}")
+                        created += 1
+                except DuplicateError:
+                    log.debug(f"    ⊘ duplicate")
+                    skipped += 1
+                except Exception as e:
+                    log.error(f"    ✗ {e}")
+                    errors += 1
 
     log.info(f"\n{'='*60}\nDone: created={created} skipped={skipped} errors={errors}\n{'='*60}")
     if errors >= 3:

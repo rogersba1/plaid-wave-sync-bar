@@ -1,0 +1,20 @@
+{
+  "keywords": {
+    "allegheny": "Real Estate Taxes",
+    "borough": "Utilities - Sewer",
+    "christopher": "Property Management Fees",
+    "columbia": "Utilities - Gas",
+    "comcast": "Computer – Internet",
+    "duquesne": "Utilities - Electric",
+    "erie": "Insurance – Property",
+    "eugene": "Repairs & Maintenance",
+    "homeserve": "Utilities - Water",
+    "interest paid": "Interest Income",
+    "joseph": "Real Estate Taxes",
+    "republicservices": "Trash Service",
+    "republicservices~": "Trash Service",
+    "wvwa": "Utilities - Water"
+  },
+  "fallback_expense": "Uncategorized Expense",
+  "fallback_income": "Uncategorized Income"
+}
