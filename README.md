@@ -48,6 +48,9 @@ uv run plaid_sync.py --reconcile --days 7
 
 # Validate your keyword mappings
 uv run plaid_sync.py --dump-accounts
+
+# Multi-business run (routes accounts per business)
+uv run scripts/multi_business_sync.py --dry-run --days 30
 ```
 
 ## How It Works
@@ -80,13 +83,22 @@ Plaid (bank)              keywords.json           Wave (accounting)
 
 ## Multi-Business Setup
 
-One run can sync multiple Wave businesses, even when all bank accounts come from one Plaid connection.
+Keep `plaid_sync.py` close to upstream for core sync logic, and use the multi-business wrapper to fan out runs by business.
+
+Run with:
+
+```bash
+uv run scripts/multi_business_sync.py --days 30
+```
+
+The wrapper runs `plaid_sync.py` once per business scope.
 
 Use these env vars:
 
 - `WAVE_BUSINESS_ID` = default business id (used when an account is not explicitly mapped)
 - `PLAID_ACCOUNT_BUSINESS_IDS` = map each Plaid account to a Wave business id
 - `KEYWORDS_FILES_BY_BUSINESS` = use a separate keywords json file per business id
+- `KEYWORDS_FILE` = optional default keyword file for the default business (fallback: `keywords.json`)
 
 Format examples:
 
@@ -99,6 +111,8 @@ KEYWORDS_FILES_BY_BUSINESS="biz_34:keywords/34-grant.json,biz_95:keywords/95-ken
 ```
 
 If these are not set, behavior stays the same as before: all accounts sync into `WAVE_BUSINESS_ID` and use `KEYWORDS_FILE` (or `keywords.json`).
+
+If you only have one business, you can keep running `uv run plaid_sync.py` directly.
 
 ## Deployment Options
 

@@ -59,7 +59,7 @@ jobs:
         run: |
           DAYS="${{ github.event.inputs.days || '3' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
-          CMD="uv run plaid_sync.py --days $DAYS"
+          CMD="uv run scripts/multi_business_sync.py --days $DAYS"
           if [ "$DRY_RUN" = "true" ]; then
             CMD="$CMD --dry-run"
           fi
