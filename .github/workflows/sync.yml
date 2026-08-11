@@ -1,9 +1,10 @@
 name: Plaid → Wave Sync
 
 on:
-  schedule:
-    # Daily at 9am ET (1pm UTC)
-    - cron: '0 13 * * *'
+  # Temporarily disabled; re-enable by restoring the schedule block below.
+  # schedule:
+  #   # Daily at 9am ET (1pm UTC)
+  #   - cron: '0 13 * * *'
   workflow_dispatch:
     inputs:
       days:
